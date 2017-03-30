@@ -37,7 +37,7 @@
       ("\\w{12}-(\\d{4})(\\w{3})\\d{1,2}-(\\d{4})(\\w{3})\\d{1,2}" filename)
     (list :start-month start-month :start-year start-year :end-month end-month :end-year end-year)))
 
-;;(year-from-filename "00886XXX1871-2016Dec23-2017Jan23.xml")
+;;(filename-date-range "00886XXX1871-2016Dec23-2017Jan23.xml")
 
 (defun parse-date-string (date-string date-range-plist)
   "Convert date string format 'dd mmm' to 'YYYY-MM-DD'"

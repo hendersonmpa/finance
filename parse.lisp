@@ -130,7 +130,7 @@
          (entries (loop for page across pages
                      for l = (coerce
                               (progn (extract-anchors page)
-                                     (lquery:$ doc "text"
+                                     (lquery:$ page "text"
                                                (combine (attr :left) (attr :width) (text))
                                                (map-apply #'statement-filter))) 'list )
                      collect l))
@@ -156,11 +156,12 @@
                              (gather-helper (rest loe) date accum))
                             (t (gather-helper (rest loe) date accum))))))))
     (gather-helper loe nil nil)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Transaction classes and methods
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(clsql:def-view-class transaction ()
+(defclass transaction ()
   ((date
     :initarg :date
     :type clsql:date
@@ -168,41 +169,49 @@
    (desc
     :initarg :desc
     :type string
-    :accessor desc))
+    :accessor desc)
+   (amount
+    :initarg :amount
+    :type float
+    :accessor amount))
   (:documentation "transaction class"))
 
-(clsql:def-view-class deposit (transaction)
-  ((deposit
-    :initarg :deposit
-    :type float
-    :accessor deposit))
+(defclass deposit (transaction)
+  ()
   (:documentation "deposit class"))
 
-(clsql:def-view-class withdrawal (transaction)
-  ((withdrawal
-    :initarg :withdrawal
-    :type float
-    :accessor withdrawal))
+(defclass withdrawal (transaction)
+  ()
   (:documentation "withdrawal class"))
 
-
-
-(defun make-deposit (date desc deposit)
+(defun make-deposit (date desc amount)
   (make-instance 'deposit
                  :date date
                  :desc desc
-                 :deposit deposit))
+                 :amount amount))
 
+(defun make-withdrawal (date desc amount)
+  (make-instance 'withdrawal
+                 :date date
+                 :desc desc
+                 :amount amount))
 
-(defmethod print-object ((object transaction) stream)
-  "print transaction object"
-  (print-unreadable-object (object stream :type t)
-    (with-slots (acc-t acc-n date cheq-n desc desc2 cad usd) object
-      (format stream "~%acc:~a #:~s ~%Date:~d cheque #:~d ~%Description:~s , ~s~%cad:~$  usd:~$"
-              acc-t acc-n date cheq-n desc desc2 cad usd))))
+(defun gathered-objects (gathered-list date-range-plist)
+  (let ((accum nil))
+    (dolist (entry gathered-list accum)
+      (destructuring-bind (date type description amount) entry
+        (let ((formated-date (parse-date-string date date-range-plist)))
+          (case type
+            (withdrawal (push (make-withdrawal formated-date description amount) accum))
+            (deposit (push (make-deposit formated-date description amount) accum))
+            (otherwise nil)))))))
 
-
-
+;; (defmethod print-object ((object transaction) stream)
+;;   "print transaction object"
+;;   (print-unreadable-object (object stream :type t)
+;;     (with-slots (acc-t acc-n date cheq-n desc desc2 cad usd) object
+;;       (format stream "~%acc:~a #:~s ~%Date:~d cheque #:~d ~%Description:~s , ~s~%cad:~$  usd:~$"
+;;               acc-t acc-n date cheq-n desc desc2 cad usd))))
 ;; (defun parse-transaction-csv (pathname)
 ;;   (cl-csv:read-csv pathname
 ;;                    :map-fn #'make-transaction
