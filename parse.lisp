@@ -1,0 +1,242 @@
+;;; file parse.lispo
+;;; Classes and Methods to parse bank statements
+(in-package :finance)
+
+(defparameter *date-anchor* nil)
+(defparameter *description-anchor* nil)
+(defparameter *withdrawal-anchor* nil)
+(defparameter *deposit-anchor* nil)
+(defparameter *balance-anchor* nil)
+(uiop:directory-files *statements*)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Parse the xml extract using iquery
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;<text top="668" left="67" width="24" height="12" font="1"><b>Date</b></text>
+
+;; (defparameter *doc* (lquery:$ (initialize (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml"))))
+
+(defun extract-anchors (page)
+  (flet ((extract-helper (left width text)
+           (let* ((l (parse-integer left))
+                  (w (parse-integer width))
+                  (sum (+ l w)))
+             ;;(format t "~a~%" text)
+             (cond ((string= text "Date") (setf *date-anchor* sum))
+                   ((string= text "Description") (setf *description-anchor* l))
+                   ((string= text "Withdrawals ($)") (setf *withdrawal-anchor* sum))
+                   ((string= text "Deposits ($)") (setf *deposit-anchor* sum))
+                   ((string= text "Balance ($)") (setf *balance-anchor* sum))
+                   ;;(otherwise (print sum))
+                   ))))
+    (lquery:$ page
+              "text"
+              (combine (attr :left) (attr :width) (text))
+              (map-apply #'extract-helper))
+    ;; (print (list :date *date-anchor*
+    ;;               :description *description-anchor*
+    ;;               :withdrawal *withdrawal-anchor*
+    ;;               :deposit *deposit-anchor*
+    ;;               :balance *balance-anchor*))
+    ;; (terpri)
+    ))
+;
+;;(extract-anchors (elt (lquery:$ *doc* "page") 0))
+
+;; (lquery:$ *doc*
+;;           "page")
+
+;; (lquery:$ *doc*
+;;           "page"
+;;           (page-anchors))
+
+(defun datep (line)
+  (let ((date-matcher (re:create-scanner
+                       "^\\d{1,2} \\w{3}$")))
+    (if (re:scan-to-strings date-matcher line)
+        line nil)))
+
+(defun handler-parse-number (s)
+  "Convert string to number"
+  (let ((no-commas (remove #\, s )))
+    (handler-case (parse-number:parse-number no-commas)
+      (parse-error () nil)
+      (type-error () nil))))
+
+(defun statement-filter (left width text)
+  (let* ((l (parse-integer left))
+         (w (parse-integer width))
+         (sum (+ l w))
+         (date-range (alexandria:iota 20 :start *date-anchor*))
+         (description-range (alexandria:iota 10 :start *description-anchor*))
+         (withdrawal-range (alexandria:iota 5 :start *withdrawal-anchor*))
+         (deposit-range (alexandria:iota 10 :start *deposit-anchor*))
+         ;;(balance-range (alexandria:iota 10 :start *balance-anchor*))
+         (float-text (handler-parse-number text)))
+    (flet ((format-text (label left width sum text)
+             (format t "~a: [~a+~a=~a] ~a~%" label left width sum text)))
+      (cond ((and (member sum date-range) (datep text))
+             (format-text "Date" left width sum text))
+            ((member l description-range) ;; used the left alignment of "Description" as anchor
+             (format-text "Description" left width sum text))
+            ((and (member sum withdrawal-range) float-text)
+             (format-text "Withdrawal" left width sum text))
+            ((and (member sum deposit-range) float-text)
+             (format-text "Deposit" left width sum text))
+            ;; ((and (member sum balance-range) float-text)
+            ;;  (format-text "Balance" left width sum text))
+            (t  nil)))))
+
+(defun statement-filter (left width text)
+  (let* ((l (parse-integer left))
+         (w (parse-integer width))
+         (sum (+ l w))
+         (date-range (alexandria:iota 20 :start *date-anchor*))
+         (description-range (alexandria:iota 10 :start *description-anchor*))
+         (withdrawal-range (alexandria:iota 5 :start *withdrawal-anchor*))
+         (deposit-range (alexandria:iota 10 :start *deposit-anchor*))
+         ;;(balance-range (alexandria:iota 10 :start *balance-anchor*))
+         (float-text (handler-parse-number text)))
+    (flet ((create-plist (label text)
+             (list :label label :text text)))
+      (cond ((and (member sum date-range) (datep text))
+             (create-plist 'date text))
+            ((member l description-range) ;; used the left alignment of "Description" as anchor
+             (create-plist 'description text))
+            ((and (member sum withdrawal-range) float-text)
+             (create-plist 'withdrawal float-text))
+            ((and (member sum deposit-range) float-text)
+             (create-plist 'deposit float-text))
+            ;; ((and (member sum balance-range) float-text)
+            ;;  (format-text "Balance" left width sum text))
+            (t  nil)))))
+
+(defun statement-all (top left width text)
+  (let* ((l (parse-integer left))
+         (w (parse-integer width))
+         (sum (+ l w)))
+    (format t "[~a|~a + ~a = ~a]~a~%" top left width sum text)))
+
+;; (lquery:$ *doc*
+;;           "text"
+;;           (combine (attr :top) (attr :left) (attr :width) (text))
+;;           (map-apply #'statement-all))
+
+;; (member left '("25" "93" "105" "477" "484" "645" "796") :test #'string=)
+
+(defun parse-statement-file (&optional (pathname (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml")))
+  (let* ((doc (lquery:$ (initialize pathname)))
+         (pages (lquery:$ doc "page"))
+         (entries (loop for page across pages
+                     for l = (coerce
+                              (progn (extract-anchors page)
+                                     (lquery:$ doc "text"
+                                               (combine (attr :left) (attr :width) (text))
+                                               (map-apply #'statement-filter))) 'list )
+                     collect l))
+         (clean-entries (remove-if #'null (apply #'append entries))))
+    clean-entries))
+
+
+(defun gather-transactions (loe)
+  "accepts parsed statement file i.e. list of entries and gathers them to output
+((date type description amount)..)"
+  (labels ((gather-helper (loe date accum)
+             (cond ((null loe) (reverse accum))
+                   ((eql (getf (first loe) :label) 'date)
+                    (setf date (getf (first loe) :text))
+                    (gather-helper (rest loe) date accum))
+                   (t
+                    (let ((label (getf (first loe) :label)))
+                      (cond ((eql label 'description)
+                             (push (list date
+                                         (getf (second loe) :label)
+                                         (getf (first loe) :text)
+                                         (getf (second loe) :text)) accum)
+                             (gather-helper (rest loe) date accum))
+                            (t (gather-helper (rest loe) date accum))))))))
+    (gather-helper loe nil nil)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Transaction classes and methods
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(clsql:def-view-class transaction ()
+  ((date
+    :initarg :date
+    :type clsql:date
+    :accessor date)
+   (desc
+    :initarg :desc
+    :type string
+    :accessor desc))
+  (:documentation "transaction class"))
+
+(clsql:def-view-class deposit (transaction)
+  ((deposit
+    :initarg :deposit
+    :type float
+    :accessor deposit))
+  (:documentation "deposit class"))
+
+(clsql:def-view-class withdrawal (transaction)
+  ((withdrawal
+    :initarg :withdrawal
+    :type float
+    :accessor withdrawal))
+  (:documentation "withdrawal class"))
+
+
+
+(defun make-deposit (date desc deposit)
+  (make-instance 'deposit
+                 :date date
+                 :desc desc
+                 :deposit deposit))
+
+
+(defmethod print-object ((object transaction) stream)
+  "print transaction object"
+  (print-unreadable-object (object stream :type t)
+    (with-slots (acc-t acc-n date cheq-n desc desc2 cad usd) object
+      (format stream "~%acc:~a #:~s ~%Date:~d cheque #:~d ~%Description:~s , ~s~%cad:~$  usd:~$"
+              acc-t acc-n date cheq-n desc desc2 cad usd))))
+
+
+
+;; (defun parse-transaction-csv (pathname)
+;;   (cl-csv:read-csv pathname
+;;                    :map-fn #'make-transaction
+;;                    :skip-first-p t
+;;                    :separator #\,
+;;                                         ;:quote t ;; there are quotes in comment strings
+;;                    :unquoted-empty-string-is-nil t))
+
+(defun archive-file (old-pathname &optional (to-subdir "archive"))
+  "Archive csv file"
+  (let ((new-pathname
+         (make-pathname :defaults old-pathname
+                        :directory (append
+                                    (butlast (pathname-directory old-pathname))
+                                    (list to-subdir)))))
+    (rename-file old-pathname new-pathname)))
+
+(defun load-dir (&optional (dir-name *statements*))
+  "Upload files to db table based on regex match"
+  (let ((path-list (uiop:directory-files dir-name))
+        (accum nil))
+    (dolist (pathname path-list (apply #'nconc accum))
+      (push (parse-transaction-csv pathname) accum))))
+
+;;(defparameter *lot* (load-dir))
+
+(defun filter-desc (str data)
+  (flet ((pred (e)
+           (search str e :test #'string-equal)))
+    (remove-if-not #'pred data :key #'desc)))
+
+;;(filter-desc "netflix" *lot*)
+
+;; filter date
+
+(defun payee-sum (payee lot)
+  (let ((fl (filter (lambda (e) (search )))))))
