@@ -2,7 +2,6 @@
 ;;; Utility functions for the finance package
 
 (in-package :finance)
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Date and time functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -57,3 +56,5 @@
 (defun handler-parse-timestring (s)
   (handler-case (clsql-sys:parse-timestring s :junk-allowed t)
     (sb-kernel:case-failure () nil)))
+
+

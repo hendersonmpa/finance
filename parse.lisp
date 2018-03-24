@@ -1,4 +1,4 @@
-;;; file parse.lispo
+;;; file parse.lisp
 ;;; Classes and Methods to parse bank statements
 (in-package :finance)
 
@@ -9,12 +9,29 @@
 (defparameter *balance-anchor* nil)
 (uiop:directory-files *statements*)
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Convert pdf to xml
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; https://thomaslevine.com/!/computing/parsing-pdfs/
+;; https://poppler.freedesktop.org/
+
+;; pdftohtml -xml 451401XXXXXX1544-2016Dec29-2017Jan24.pdf
+
+(defun pdf->xml (input-file-string)
+  "pdftohtml -xml filename.pdf"
+  ;; (pdf->xml "451401XXXXXX1544-2016Dec29-2017Jan24.pdf")
+  (uiop:run-program
+   (list "/usr/bin/pdftohtml" "-xml" input-file-string)
+   :output t))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Parse the xml extract using iquery
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;<text top="668" left="67" width="24" height="12" font="1"><b>Date</b></text>
 
-;; (defparameter *doc* (lquery:$ (initialize (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml"))))
+(defparameter *doc* (lquery:$ (initialize (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml"))))
 
 (defun extract-anchors (page)
   (flet ((extract-helper (left width text)
@@ -166,10 +183,10 @@
     :initarg :date
     :type clsql:date
     :accessor date)
-   (desc
-    :initarg :desc
+   (description
+    :initarg :description
     :type string
-    :accessor desc)
+    :accessor description)
    (amount
     :initarg :amount
     :type float
@@ -184,19 +201,20 @@
   ()
   (:documentation "withdrawal class"))
 
-(defun make-deposit (date desc amount)
+(defun make-deposit (date description amount)
   (make-instance 'deposit
                  :date date
-                 :desc desc
+                 :description description
                  :amount amount))
 
-(defun make-withdrawal (date desc amount)
+(defun make-withdrawal (date description amount)
   (make-instance 'withdrawal
                  :date date
-                 :desc desc
+                 :description description
                  :amount amount))
 
-(defun gathered-objects (gathered-list date-range-plist)
+(defun list-to-objects (gathered-list date-range-plist)
+  "accept a list of transactions, return a list of objects"
   (let ((accum nil))
     (dolist (entry gathered-list accum)
       (destructuring-bind (date type description amount) entry
@@ -205,6 +223,9 @@
             (withdrawal (push (make-withdrawal formated-date description amount) accum))
             (deposit (push (make-deposit formated-date description amount) accum))
             (otherwise nil)))))))
+
+;;(list-to-objects (gather-transactions (parse-statement-file)) (filename-date-range"00886XXX1871-2016Dec23-2017Jan23.xml"))
+
 
 ;; (defmethod print-object ((object transaction) stream)
 ;;   "print transaction object"

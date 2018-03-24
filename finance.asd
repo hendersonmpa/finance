@@ -18,5 +18,7 @@
                #:split-sequence)
   :components ((:file "package")
                (:file "finance")
+	       (:file "debt")
                (:file "utilities")
-               (:file "parse")))
+               (:file "parse")
+               (:file "classify")))
