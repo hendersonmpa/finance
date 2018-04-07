@@ -1,5 +1,5 @@
 ;;; file parse.lisp
-;;; Classes and Methods to parse bank statements
+;;; Classes and Methods to parse pdf bank statements
 (in-package :finance)
 
 (defparameter *date-anchor* nil)
@@ -8,7 +8,6 @@
 (defparameter *deposit-anchor* nil)
 (defparameter *balance-anchor* nil)
 (uiop:directory-files *statements*)
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Convert pdf to xml
@@ -25,7 +24,6 @@
    (list "/usr/bin/pdftohtml" "-xml" input-file-string)
    :output t))
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Parse the xml extract using iquery
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -33,45 +31,49 @@
 
 (defparameter *doc* (lquery:$ (initialize (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml"))))
 
-(defun extract-anchors (page)
+(defun bank-statement-get-anchors (page)
+  "BANK STATEMENT: extracts LEFT and WIDTH column anchor values for the Date,
+Description, Withdrawals, Deposits and Balance enties in the xml file,
+these are then used to determine which category to assign to the the
+rest of the entries"
   (flet ((extract-helper (left width text)
            (let* ((l (parse-integer left))
                   (w (parse-integer width))
-                  (sum (+ l w)))
+                  (sum (+ l w))) ;; sum is used for righ justified columns
              ;;(format t "~a~%" text)
-             (cond ((string= text "Date") (setf *date-anchor* sum))
-                   ((string= text "Description") (setf *description-anchor* l))
-                   ((string= text "Withdrawals ($)") (setf *withdrawal-anchor* sum))
-                   ((string= text "Deposits ($)") (setf *deposit-anchor* sum))
-                   ((string= text "Balance ($)") (setf *balance-anchor* sum))
+             (cond ((string= text "Date") (setf *date-anchor* l)) ;; right justified
+                   ((string= text "Description") (setf *description-anchor* l)) ;; right justified
+                   ((string= text "Withdrawals ($)") (setf *withdrawal-anchor* sum))  ;; left justified
+                   ((string= text "Deposits ($)") (setf *deposit-anchor* sum)) ;; left justified
+                   ((string= text "Balance ($)") (setf *balance-anchor* sum)) ;; left justified
                    ;;(otherwise (print sum))
                    ))))
     (lquery:$ page
               "text"
               (combine (attr :left) (attr :width) (text))
-              (map-apply #'extract-helper))
-    ;; (print (list :date *date-anchor*
-    ;;               :description *description-anchor*
-    ;;               :withdrawal *withdrawal-anchor*
-    ;;               :deposit *deposit-anchor*
-    ;;               :balance *balance-anchor*))
-    ;; (terpri)
-    ))
-;
-;;(extract-anchors (elt (lquery:$ *doc* "page") 0))
+              (map-apply #'extract-helper))))
 
-;; (lquery:$ *doc*
-;;           "page")
-
-;; (lquery:$ *doc*
-;;           "page"
-;;           (page-anchors))
-
-(defun datep (line)
-  (let ((date-matcher (re:create-scanner
-                       "^\\d{1,2} \\w{3}$")))
-    (if (re:scan-to-strings date-matcher line)
-        line nil)))
+(defun visa-statement-get-anchors (page)
+  "VISA STATEMENT: extracts LEFT and WIDTH column anchor values for the Date,
+Description, Number, Withdrawals, Deposits and Balance enties in the xml file,
+these are then used to determine which category to assign to the the
+rest of the entries"
+  (flet ((extract-helper (left text)
+           (let* ((l (parse-integer left))
+		  ;;                (w (parse-integer width))
+		  ;;                  (sum (+ l w))
+		  ) ;; sum is used for righ justified columns
+             ;;(format t "~a~%" text)
+             (cond ((string= text "TRANSACTION POSTING")
+		    (setf *date-anchor* l
+			  *description-anchor* (+ l 100 ))) ;; left justified
+                   ((string= text "AMOUNT ($)")
+		    (setf *withdrawal-anchor* l))  ;; right justified
+		   (t nil)))))
+    (lquery:$ page
+              "text"
+              (combine (attr :left) (text))
+              (map-apply #'extract-helper))))
 
 (defun handler-parse-number (s)
   "Convert string to number"
@@ -80,89 +82,100 @@
       (parse-error () nil)
       (type-error () nil))))
 
-(defun statement-filter (left width text)
-  (let* ((l (parse-integer left))
-         (w (parse-integer width))
-         (sum (+ l w))
-         (date-range (alexandria:iota 20 :start *date-anchor*))
-         (description-range (alexandria:iota 10 :start *description-anchor*))
-         (withdrawal-range (alexandria:iota 5 :start *withdrawal-anchor*))
-         (deposit-range (alexandria:iota 10 :start *deposit-anchor*))
-         ;;(balance-range (alexandria:iota 10 :start *balance-anchor*))
-         (float-text (handler-parse-number text)))
-    (flet ((format-text (label left width sum text)
-             (format t "~a: [~a+~a=~a] ~a~%" label left width sum text)))
-      (cond ((and (member sum date-range) (datep text))
-             (format-text "Date" left width sum text))
-            ((member l description-range) ;; used the left alignment of "Description" as anchor
-             (format-text "Description" left width sum text))
-            ((and (member sum withdrawal-range) float-text)
-             (format-text "Withdrawal" left width sum text))
-            ((and (member sum deposit-range) float-text)
-             (format-text "Deposit" left width sum text))
-            ;; ((and (member sum balance-range) float-text)
-            ;;  (format-text "Balance" left width sum text))
-            (t  nil)))))
+(defun datep (line)
+  "date predicate"
+  (let ((bank-date (re:create-scanner
+		    "^\\d{1,2} \\w{3}$"))
+	(visa-date (re:create-scanner
+                       "^\\w{3} \\d{2}$")))
+    (if (or (re:scan-to-strings bank-date line)
+	    (re:scan-to-strings visa-date line))
+        line nil)))
 
-(defun statement-filter (left width text)
+(defun dollars-parse (line)
+  "date predicate"
+  (let* ((dollars (re:create-scanner
+		   "^\\$(\\d*\\.\\d{2})$")))
+    (re:register-groups-bind (digits-only)
+			  (dollars line)
+			(handler-parse-number digits-only))))
+
+(defun bank-statement-filter (left width text)
+  "BANK STATEMENT:compares the LEFT or (SUM LEFT WIDTH) to the ANCHOR parameters to identify and collect entries of interest"
   (let* ((l (parse-integer left))
          (w (parse-integer width))
          (sum (+ l w))
-         (date-range (alexandria:iota 20 :start *date-anchor*))
-         (description-range (alexandria:iota 10 :start *description-anchor*))
          (withdrawal-range (alexandria:iota 5 :start *withdrawal-anchor*))
          (deposit-range (alexandria:iota 10 :start *deposit-anchor*))
-         ;;(balance-range (alexandria:iota 10 :start *balance-anchor*))
          (float-text (handler-parse-number text)))
     (flet ((create-plist (label text)
              (list :label label :text text)))
-      (cond ((and (member sum date-range) (datep text))
+      (cond ((and (equalp l *date-anchor*) (datep text)) ;; used the left alignment of "Date" as anchor
              (create-plist 'date text))
-            ((member l description-range) ;; used the left alignment of "Description" as anchor
+            ((equal l *description-anchor*) ;; used the left alignment of "Description" as anchor
              (create-plist 'description text))
             ((and (member sum withdrawal-range) float-text)
              (create-plist 'withdrawal float-text))
             ((and (member sum deposit-range) float-text)
              (create-plist 'deposit float-text))
-            ;; ((and (member sum balance-range) float-text)
-            ;;  (format-text "Balance" left width sum text))
+	    (t  nil)))))
+
+(defun visa-statement-filter (left text)
+  "VISA STATEMENT:compares the LEFT or (SUM LEFT WIDTH) to the ANCHOR parameters to identify and collect entries of interest"
+  (let* ((l (parse-integer left))
+;;         (w (parse-integer width))
+;;         (sum (+ l w))
+         (description-range (alexandria:iota 20 :start *description-anchor*))
+         (withdrawal-range (alexandria:iota 15 :start *withdrawal-anchor*))
+;;         (float-text (handler-parse-number text))
+	 )
+    (flet ((create-plist (label left text)
+             (list :label label :left left :text text)))
+      (cond ((and (equalp l *date-anchor*) (datep text)) ;; used the left alignment of "Date" as anchor
+             (create-plist 'date left text))
+            ((member l description-range);; used the left alignment of "Description" as anchor
+             (create-plist 'description left text))
+            ((and (member l withdrawal-range) (dollars-parse text))
+             (create-plist 'withdrawal left (dollars-parse text)))
             (t  nil)))))
 
-(defun statement-all (top left width text)
-  (let* ((l (parse-integer left))
-         (w (parse-integer width))
-         (sum (+ l w)))
-    (format t "[~a|~a + ~a = ~a]~a~%" top left width sum text)))
-
-;; (lquery:$ *doc*
-;;           "text"
-;;           (combine (attr :top) (attr :left) (attr :width) (text))
-;;           (map-apply #'statement-all))
-
-;; (member left '("25" "93" "105" "477" "484" "645" "796") :test #'string=)
-
-(defun parse-statement-file (&optional (pathname (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml")))
+(defun bank-statement-parse (&optional (pathname (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml")))
   (let* ((doc (lquery:$ (initialize pathname)))
          (pages (lquery:$ doc "page"))
          (entries (loop for page across pages
                      for l = (coerce
-                              (progn (extract-anchors page)
+                              (progn (bank-statement-get-anchors page)
                                      (lquery:$ page "text"
                                                (combine (attr :left) (attr :width) (text))
-                                               (map-apply #'statement-filter))) 'list )
+                                               (map-apply #'bank-statement-filter))) 'list )
                      collect l))
          (clean-entries (remove-if #'null (apply #'append entries))))
     clean-entries))
 
 
-(defun gather-transactions (loe)
+(defun visa-statement-parse (&optional (pathname (merge-pathnames *statements* "451401XXXXXX1544-2016Dec29-2017Jan24.xml")))
+  (let* ((doc (lquery:$ (initialize pathname)))
+         (pages (lquery:$ doc "page"))
+         (entries (loop for page across pages
+                     for l = (coerce
+                              (progn (visa-statement-get-anchors page)
+                                     (lquery:$ page "text"
+                                               (combine (attr :left) (text))
+                                               (map-apply #'visa-statement-filter))) 'list )
+                     collect l))
+         (clean-entries (remove-if #'null (apply #'append entries))))
+    clean-entries))
+
+(defun bank-statement-transactions (loe)
   "accepts parsed statement file i.e. list of entries and gathers them to output
-((date type description amount)..)"
+plist date type description amount.."
   (labels ((gather-helper (loe date accum)
              (cond ((null loe) (reverse accum))
-                   ((eql (getf (first loe) :label) 'date)
-                    (setf date (getf (first loe) :text))
+                   ((eql (getf (first loe) :label) 'date) ;; if the entry is a date hold onto that date until the next date entry
+                    (setf date (getf (first loe) :text)) 
                     (gather-helper (rest loe) date accum))
+		   ((null date)
+		    (gather-helper (rest loe) date accum)) ;; if a date has not been found move to the next entry
                    (t
                     (let ((label (getf (first loe) :label)))
                       (cond ((eql label 'description)
@@ -201,6 +214,10 @@
   ()
   (:documentation "withdrawal class"))
 
+(defclass visa (transaction)
+  ()
+  (:documentation "visa class"))
+
 (defun make-deposit (date description amount)
   (make-instance 'deposit
                  :date date
@@ -213,10 +230,16 @@
                  :description description
                  :amount amount))
 
-(defun list-to-objects (gathered-list date-range-plist)
+(defun make-visa (date description amount)
+  (make-instance 'visa
+                 :date date
+                 :description description
+                 :amount amount))
+
+(defun list-to-objects (transaction-list date-range-plist)
   "accept a list of transactions, return a list of objects"
   (let ((accum nil))
-    (dolist (entry gathered-list accum)
+    (dolist (entry transaction-list accum)
       (destructuring-bind (date type description amount) entry
         (let ((formated-date (parse-date-string date date-range-plist)))
           (case type
@@ -226,13 +249,47 @@
 
 ;;(list-to-objects (gather-transactions (parse-statement-file)) (filename-date-range"00886XXX1871-2016Dec23-2017Jan23.xml"))
 
+(defmethod print-object ((object transaction) stream)
+  "print transaction object"
+  (print-unreadable-object (object stream :type t)
+    (with-slots (date description amount) object
+      (format stream "~%Date:~d, Description:~s, Amount:~$"
+              date description amount))))
 
-;; (defmethod print-object ((object transaction) stream)
-;;   "print transaction object"
-;;   (print-unreadable-object (object stream :type t)
-;;     (with-slots (acc-t acc-n date cheq-n desc desc2 cad usd) object
-;;       (format stream "~%acc:~a #:~s ~%Date:~d cheque #:~d ~%Description:~s , ~s~%cad:~$  usd:~$"
-;;               acc-t acc-n date cheq-n desc desc2 cad usd))))
+
+(defmethod print-object ((object deposit) stream)
+  "print transaction object"
+  (print-unreadable-object (object stream :type t)
+    (with-slots (date description amount) object
+      (format stream "~%Date:~d, Description:~s, Deposit:~$"
+              date description amount))))
+
+(defmethod print-object ((object withdrawal) stream)
+  "print transaction object"
+  (print-unreadable-object (object stream :type t)
+    (with-slots (date description amount) object
+      (format stream "~%Date:~d, Description:~s, Withdrawal:~$"
+              date description amount))))
+
+(defmethod format-object ((object deposit) stream)
+  "print transaction object: date, description, withdrawal, deposit"
+  (with-slots (date description amount) object
+    (format stream "~d, ~s, ,~$~%" 
+	    date description amount)))
+
+(defmethod format-object ((object withdrawal) stream)
+  "print transaction object: date, description, withdrawal, deposit"
+  (with-slots (date description amount) object
+    (format stream "~d, ~s, ~$, ~%"
+	    date description amount)))
+
+;; (dolist (ob (list-to-objects (bank-statement-transactions (bank-statement-parse)) (filename-date-range"00886XXX1871-2016Dec23-2017Jan23.xml")))
+;;   (format-object ob t))
+
+
+
+
+
 ;; (defun parse-transaction-csv (pathname)
 ;;   (cl-csv:read-csv pathname
 ;;                    :map-fn #'make-transaction
@@ -270,3 +327,6 @@
 
 (defun payee-sum (payee lot)
   (let ((fl (filter (lambda (e) (search )))))))
+
+
+
