@@ -17,19 +17,137 @@
 
 ;; pdftohtml -xml 451401XXXXXX1544-2016Dec29-2017Jan24.pdf
 
-(defun pdf->xml (input-file-string)
-  "pdftohtml -xml filename.pdf"
-  ;; (pdf->xml "451401XXXXXX1544-2016Dec29-2017Jan24.pdf")
-  (uiop:run-program
-   (list "/usr/bin/pdftohtml" "-xml" input-file-string)
-   :output t))
+(defun pdf->xml (file-string &optional (dir-path *statements*))
+  "(pdf->xml \"451401XXXXXX1544-2016Dec29-2017Jan24.pdf\") and return xml pathname"
+  (let* ((pathname (merge-pathnames dir-path file-string))
+	(file-path-string (namestring pathname)))
+    (uiop:run-program
+     (list "/usr/bin/pdftohtml" "-xml" file-path-string)
+     :output t)
+      (make-pathname :defaults pathname
+		 :type "xml")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Parse the xml extract using iquery
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;<text top="668" left="67" width="24" height="12" font="1"><b>Date</b></text>
 
-(defparameter *doc* (lquery:$ (initialize (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml"))))
+(defparameter *bank* (plump:parse (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml"))
+ "parsed doc used for development" )
+(lquery:$  *bank* "text" (combine (attr :left) (attr :width) (text)))
+(lquery:$  *bank* "page")
+
+(defparameter *bank-vop* (map 'vector (lambda (page)
+				   (lquery:$ page
+					     "text"
+					     (combine (attr :left) (attr :width) (text))))
+			      (lquery:$  *bank* "page")) "Vector of pages used for development")
+
+(defparameter *visa* (plump:parse (merge-pathnames *statements* "451401XXXXXX1544-2016Dec29-2017Jan24.xml"))
+  "parsed doc used for development")
+
+(defparameter *visa-vop* (map 'vector (lambda (page)
+				   (lquery:$ page
+					     "text"
+					     (combine (attr :left) (text))))
+			      (lquery:$  *visa* "page")) "Vector of pages used for development")
+
+(defclass statement ()
+  ((pages :initarg :pages :accessor pages))
+  (:documentation "parent statement object"))
+
+(defclass visa-statement (statement)
+  ()
+  (:documentation "visa statement object"))
+
+(defclass bank-statement (statement)
+  ()
+  (:documentation "bank statement object"))
+
+(defclass statement-page ()
+  ((vol :initarg :vol :accessor vol :documentation "vector of lines")
+   (date-anchor :initarg :date-anchor :accessor date-anchor)
+   (description-anchor :initarg :description-anchor :accessor description-anchor)
+   (withdrawal-anchor :initarg :withdrawal-anchor :accessor withdrawal-anchor))
+  (:documentation "statement page object"))
+
+(defclass bank-statement-page (statement-page)
+  ((deposit-anchor :initarg :deposit-anchor :accessor deposit-anchor)
+   (balance-anchor :initarg :balance-anchor :accessor balance-anchor))
+  (:documentation "bank statement page object"))
+
+(defclass visa-statement-page (statement-page)
+  ()
+  (:documentation "visa statement page object"))
+
+
+(defun make-bank-statement-page (page)
+  (make-instance 'bank-statement-page
+		 :vol page))
+
+(defmethod initialize-instance :after ((object bank-statement-page) &key)
+  "BANK STATEMENT: extracts LEFT and WIDTH column anchor values for the Date,
+Description, Withdrawals, Deposits and Balance enties in the xml file,
+these are then used to determine which category to assign to the the
+rest of the entries"
+  (with-accessors ((vol vol)
+		   (date-anchor date-anchor)
+		   (description-anchor description-anchor)
+		   (withdrawal-anchor withdrawal-anchor)
+		   (deposit-anchor deposit-anchor)
+		   (balance-anchor balance-anchor)) object
+    (flet ((get-anchors (line)
+	     (destructuring-bind (left width text) line
+	       (let* ((left-num (parse-integer left))
+		     (width-num (parse-integer width))
+		     (sum (+ left-num width-num))) ;; sum is used for righ justified columns
+		 ;;(format t "~a~%" text)
+		 (cond ((string= text "Date") (setf date-anchor left-num)) ;; right justified
+		       ((string= text "Description") (setf description-anchor left-num)) ;; right justified
+		       ((string= text "Withdrawals ($)") (setf withdrawal-anchor sum))  ;; left justified
+		       ((string= text "Deposits ($)") (setf deposit-anchor sum)) ;; left justified
+		       ((string= text "Balance ($)") (setf balance-anchor sum)) ;; left justified
+		       (t nil)
+		       )))))
+	(map 'nil #'get-anchors (vol object)))))
+
+(defun make-visa-statement-page (page)
+  (make-instance 'visa-statement-page
+		 :vol page))
+
+(defmethod initialize-instance :after ((object visa-statement-page) &key)
+    "VISA STATEMENT: extracts LEFT and WIDTH column anchor values for the Date,
+Description, Number, Withdrawals, Deposits and Balance enties in the xml file,
+these are then used to determine which category to assign to the the
+rest of the entries"
+    (with-accessors ((vol vol)
+		     (date-anchor date-anchor)
+		     (description-anchor description-anchor)
+		     (withdrawal-anchor withdrawal-anchor)) object
+      (flet ((get-anchors (line)
+	       (destructuring-bind (left text) line 
+		   (let ((left-num (parse-integer left)))
+		     (cond ((string= text "TRANSACTION POSTING")
+			    (setf date-anchor left-num
+				  description-anchor (+ left-num 100 ))) ;; left justified
+			   ((string= text "AMOUNT ($)")
+			    (setf withdrawal-anchor left))  ;; right justified
+			   (t nil))))))
+	(map 'nil #'get-anchors (vol object)))))
+
+(defun make-bank-statement (pdf-file-string)
+  (flet ((extract-pages (parsed-content)
+	   (map 'vector (lambda (page)
+			  (lquery:$ page "text"
+					     (combine (attr :left) (attr :width) (text))))
+		(lquery:$ parsed-content "page"))))
+    (let* ((xml-file-name (pdf->xml pdf-file-string))
+	   (parsed-content (plump:parse xml-file-name))
+	   (raw-pages (extract-pages parsed-content)))
+      (make-instance 'bank-statement
+		     :pages (map 'vector #'make-bank-statement-page raw-pages)))))
+
+;; TODO:: Make these functions into methods
 
 (defun bank-statement-get-anchors (page)
   "BANK STATEMENT: extracts LEFT and WIDTH column anchor values for the Date,
