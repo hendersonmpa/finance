@@ -58,3 +58,27 @@
     (sb-kernel:case-failure () nil)))
 
 
+(defun handler-parse-number (string)
+  "Convert string to number"
+  (let ((no-commas (remove #\, string )))
+    (handler-case (parse-number:parse-number no-commas)
+      (parse-error () nil)
+      (type-error () nil))))
+
+(defun dollars-parse (line)
+  "date predicate"
+  (let* ((dollars (re:create-scanner
+		   "^\\$(\\d*\\.\\d{2})$")))
+    (re:register-groups-bind (digits-only)
+			  (dollars line)
+      (handler-parse-number digits-only))))
+
+(defun datep (line)
+  "date predicate"
+  (let ((bank-date (re:create-scanner
+		    "^\\d{1,2} \\w{3}$"))
+	(visa-date (re:create-scanner
+                       "^\\w{3} \\d{2}$")))
+    (if (or (re:scan-to-strings bank-date line)
+	    (re:scan-to-strings visa-date line))
+        line nil)))

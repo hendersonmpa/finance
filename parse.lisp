@@ -1,12 +1,6 @@
 ;;; file parse.lisp
 ;;; Classes and Methods to parse pdf bank statements
 (in-package :finance)
-
-(defparameter *date-anchor* nil)
-(defparameter *description-anchor* nil)
-(defparameter *withdrawal-anchor* nil)
-(defparameter *deposit-anchor* nil)
-(defparameter *balance-anchor* nil)
 (uiop:directory-files *statements*)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -34,8 +28,6 @@
 
 (defparameter *bank* (plump:parse (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml"))
  "parsed doc used for development" )
-(lquery:$  *bank* "text" (combine (attr :left) (attr :width) (text)))
-(lquery:$  *bank* "page")
 
 (defparameter *bank-vop* (map 'vector (lambda (page)
 				   (lquery:$ page
@@ -53,7 +45,8 @@
 			      (lquery:$  *visa* "page")) "Vector of pages used for development")
 
 (defclass statement ()
-  ((pages :initarg :pages :accessor pages))
+  ((pages :initarg :pages :accessor pages)
+   (transactions :initarg :transactions :accessor transactions))
   (:documentation "parent statement object"))
 
 (defclass visa-statement (statement)
@@ -107,8 +100,7 @@ rest of the entries"
 		       ((string= text "Withdrawals ($)") (setf withdrawal-anchor sum))  ;; left justified
 		       ((string= text "Deposits ($)") (setf deposit-anchor sum)) ;; left justified
 		       ((string= text "Balance ($)") (setf balance-anchor sum)) ;; left justified
-		       (t nil)
-		       )))))
+		       (t nil))))))
 	(map 'nil #'get-anchors (vol object)))))
 
 (defun make-visa-statement-page (page)
@@ -118,7 +110,7 @@ rest of the entries"
 (defmethod initialize-instance :after ((object visa-statement-page) &key)
     "VISA STATEMENT: extracts LEFT and WIDTH column anchor values for the Date,
 Description, Number, Withdrawals, Deposits and Balance enties in the xml file,
-these are then used to determine which category to assign to the the
+these are then used to determine which category to assign to the
 rest of the entries"
     (with-accessors ((vol vol)
 		     (date-anchor date-anchor)
@@ -131,11 +123,12 @@ rest of the entries"
 			    (setf date-anchor left-num
 				  description-anchor (+ left-num 100 ))) ;; left justified
 			   ((string= text "AMOUNT ($)")
-			    (setf withdrawal-anchor left))  ;; right justified
+			    (setf withdrawal-anchor left-num))  ;; right justified
 			   (t nil))))))
 	(map 'nil #'get-anchors (vol object)))))
 
 (defun make-bank-statement (pdf-file-string)
+  "Accept a bank statement pdf file string and return a bank-statement object"
   (flet ((extract-pages (parsed-content)
 	   (map 'vector (lambda (page)
 			  (lquery:$ page "text"
@@ -147,115 +140,73 @@ rest of the entries"
       (make-instance 'bank-statement
 		     :pages (map 'vector #'make-bank-statement-page raw-pages)))))
 
-;; TODO:: Make these functions into methods
+(defun make-visa-statement (pdf-file-string)
+  "Accept a visa statement pdf file string and return a visa-statement object"
+  (flet ((extract-pages (parsed-content)
+	   (map 'vector (lambda (page)
+			  (lquery:$ page "text"
+					     (combine (attr :left) (text))))
+		(lquery:$ parsed-content "page"))))
+    (let* ((xml-file-name (pdf->xml pdf-file-string))
+	   (parsed-content (plump:parse xml-file-name))
+	   (raw-pages (extract-pages parsed-content)))
+      (make-instance 'visa-statement
+		     :pages (map 'vector #'make-visa-statement-page raw-pages)))))
 
-(defun bank-statement-get-anchors (page)
-  "BANK STATEMENT: extracts LEFT and WIDTH column anchor values for the Date,
-Description, Withdrawals, Deposits and Balance enties in the xml file,
-these are then used to determine which category to assign to the the
-rest of the entries"
-  (flet ((extract-helper (left width text)
-           (let* ((l (parse-integer left))
-                  (w (parse-integer width))
-                  (sum (+ l w))) ;; sum is used for righ justified columns
-             ;;(format t "~a~%" text)
-             (cond ((string= text "Date") (setf *date-anchor* l)) ;; right justified
-                   ((string= text "Description") (setf *description-anchor* l)) ;; right justified
-                   ((string= text "Withdrawals ($)") (setf *withdrawal-anchor* sum))  ;; left justified
-                   ((string= text "Deposits ($)") (setf *deposit-anchor* sum)) ;; left justified
-                   ((string= text "Balance ($)") (setf *balance-anchor* sum)) ;; left justified
-                   ;;(otherwise (print sum))
-                   ))))
-    (lquery:$ page
-              "text"
-              (combine (attr :left) (attr :width) (text))
-              (map-apply #'extract-helper))))
+(defmethod filter-page ((object bank-statement-page))
+  "BANK STATEMENT PAGE:compares the LEFT or (SUM LEFT WIDTH) to the ANCHOR parameters to identify and collect entries of interest"
+  (with-accessors ((vol vol)
+		   (date-anchor date-anchor)
+		   (description-anchor description-anchor)
+		   (withdrawal-anchor withdrawal-anchor)
+		   (deposit-anchor deposit-anchor)
+		   (balance-anchor balance-anchor)) object
+    (labels ((create-plist (label text)
+	       (list :label label :text text))
+	     (filter-helper (line)
+	       (destructuring-bind (left width text) line 
+		 (let* ((left-num (parse-integer left))
+			(width-num (parse-integer width))
+			(sum (+ left-num width-num))
+			(withdrawal-range (alexandria:iota 5 :start withdrawal-anchor))
+			(deposit-range (alexandria:iota 10 :start deposit-anchor))
+			(float-text (handler-parse-number text)))
+		   (cond ((and (equalp left-num date-anchor) (datep text)) ;; used the left alignment of "Date" as anchor
+			  (create-plist 'date text))
+			 ((equal left-num description-anchor) ;; used the left alignment of "Description" as anchor
+			  (create-plist 'description text))
+			 ((and (member sum withdrawal-range) float-text)
+			  (create-plist 'withdrawal float-text))
+			 ((and (member sum deposit-range) float-text)
+			  (create-plist 'deposit float-text))
+			 (t nil))))))
+      (remove-if #'null (map 'list #'filter-helper (vol object))))))
 
-(defun visa-statement-get-anchors (page)
-  "VISA STATEMENT: extracts LEFT and WIDTH column anchor values for the Date,
-Description, Number, Withdrawals, Deposits and Balance enties in the xml file,
-these are then used to determine which category to assign to the the
-rest of the entries"
-  (flet ((extract-helper (left text)
-           (let* ((l (parse-integer left))
-		  ;;                (w (parse-integer width))
-		  ;;                  (sum (+ l w))
-		  ) ;; sum is used for righ justified columns
-             ;;(format t "~a~%" text)
-             (cond ((string= text "TRANSACTION POSTING")
-		    (setf *date-anchor* l
-			  *description-anchor* (+ l 100 ))) ;; left justified
-                   ((string= text "AMOUNT ($)")
-		    (setf *withdrawal-anchor* l))  ;; right justified
-		   (t nil)))))
-    (lquery:$ page
-              "text"
-              (combine (attr :left) (text))
-              (map-apply #'extract-helper))))
 
-(defun handler-parse-number (s)
-  "Convert string to number"
-  (let ((no-commas (remove #\, s )))
-    (handler-case (parse-number:parse-number no-commas)
-      (parse-error () nil)
-      (type-error () nil))))
-
-(defun datep (line)
-  "date predicate"
-  (let ((bank-date (re:create-scanner
-		    "^\\d{1,2} \\w{3}$"))
-	(visa-date (re:create-scanner
-                       "^\\w{3} \\d{2}$")))
-    (if (or (re:scan-to-strings bank-date line)
-	    (re:scan-to-strings visa-date line))
-        line nil)))
-
-(defun dollars-parse (line)
-  "date predicate"
-  (let* ((dollars (re:create-scanner
-		   "^\\$(\\d*\\.\\d{2})$")))
-    (re:register-groups-bind (digits-only)
-			  (dollars line)
-			(handler-parse-number digits-only))))
-
-(defun bank-statement-filter (left width text)
-  "BANK STATEMENT:compares the LEFT or (SUM LEFT WIDTH) to the ANCHOR parameters to identify and collect entries of interest"
-  (let* ((l (parse-integer left))
-         (w (parse-integer width))
-         (sum (+ l w))
-         (withdrawal-range (alexandria:iota 5 :start *withdrawal-anchor*))
-         (deposit-range (alexandria:iota 10 :start *deposit-anchor*))
-         (float-text (handler-parse-number text)))
-    (flet ((create-plist (label text)
-             (list :label label :text text)))
-      (cond ((and (equalp l *date-anchor*) (datep text)) ;; used the left alignment of "Date" as anchor
-             (create-plist 'date text))
-            ((equal l *description-anchor*) ;; used the left alignment of "Description" as anchor
-             (create-plist 'description text))
-            ((and (member sum withdrawal-range) float-text)
-             (create-plist 'withdrawal float-text))
-            ((and (member sum deposit-range) float-text)
-             (create-plist 'deposit float-text))
-	    (t  nil)))))
-
-(defun visa-statement-filter (left text)
+(defmethod filter-page ((object visa-statement-page))
   "VISA STATEMENT:compares the LEFT or (SUM LEFT WIDTH) to the ANCHOR parameters to identify and collect entries of interest"
-  (let* ((l (parse-integer left))
-;;         (w (parse-integer width))
-;;         (sum (+ l w))
-         (description-range (alexandria:iota 20 :start *description-anchor*))
-         (withdrawal-range (alexandria:iota 15 :start *withdrawal-anchor*))
-;;         (float-text (handler-parse-number text))
-	 )
-    (flet ((create-plist (label left text)
-             (list :label label :left left :text text)))
-      (cond ((and (equalp l *date-anchor*) (datep text)) ;; used the left alignment of "Date" as anchor
-             (create-plist 'date left text))
-            ((member l description-range);; used the left alignment of "Description" as anchor
-             (create-plist 'description left text))
-            ((and (member l withdrawal-range) (dollars-parse text))
-             (create-plist 'withdrawal left (dollars-parse text)))
-            (t  nil)))))
+  (with-accessors ((vol vol)
+		   (date-anchor date-anchor)
+		   (description-anchor description-anchor)
+		   (withdrawal-anchor withdrawal-anchor)) object
+    (labels ((create-plist (label left text)
+	       (list :label label :left left :text text))
+	     (filter-helper (line)
+	       (destructuring-bind (left text) line 
+		 (let ((left-num (parse-integer left))
+		       (description-range (alexandria:iota 20 :start description-anchor))
+		       (withdrawal-range (alexandria:iota 15 :start withdrawal-anchor)))
+		   (cond ((and (equalp left-num date-anchor) (datep text)) ;; used the left alignment of "Date" as anchor
+			  (create-plist 'date left-num text))
+			 ((member left-num description-range);; used the left alignment of "Description" as anchor
+			  (create-plist 'description left-num text))
+			 ((and (member left-num withdrawal-range) (dollars-parse text))
+			  (create-plist 'withdrawal left-num (dollars-parse text)))
+			 (t  nil))))))
+      (remove-if #'null (map 'list #'filter-helper (vol object))))))q
+
+
+;; TODO: think about combining filter-page and get-anchors into the intialize-instance :after method
 
 (defun bank-statement-parse (&optional (pathname (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml")))
   (let* ((doc (lquery:$ (initialize pathname)))
@@ -310,18 +261,9 @@ plist date type description amount.."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defclass transaction ()
-  ((date
-    :initarg :date
-    :type clsql:date
-    :accessor date)
-   (description
-    :initarg :description
-    :type string
-    :accessor description)
-   (amount
-    :initarg :amount
-    :type float
-    :accessor amount))
+  ((date :initarg :date :type clsql:date :accessor date)
+   (description :initarg :description :type string :accessor description)
+   (amount :initarg :amount :type float :accessor amount))
   (:documentation "transaction class"))
 
 (defclass deposit (transaction)

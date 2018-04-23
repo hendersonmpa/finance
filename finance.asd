@@ -8,6 +8,7 @@
   :depends-on (#:cl-csv
                #:clsql
                #:clsql-sqlite3
+	       #:plump
                #:lquery
                #:alexandria
                #:eazy-gnuplot
