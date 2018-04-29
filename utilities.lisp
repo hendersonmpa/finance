@@ -66,12 +66,14 @@
       (type-error () nil))))
 
 (defun dollars-parse (line)
-  "date predicate"
+  "convert a string representing a dollar amount to a numerical value"
   (let* ((dollars (re:create-scanner
-		   "^\\$(\\d*\\.\\d{2})$")))
-    (re:register-groups-bind (digits-only)
-			  (dollars line)
-      (handler-parse-number digits-only))))
+		   "^(-?)\\$(\\d*,*\\d{0,3}\\.\\d{2})$")))
+    (re:register-groups-bind (sign digits-only)
+	(dollars line)
+      (if (equal sign "-")
+      	  (- (handler-parse-number digits-only))
+	  (handler-parse-number digits-only)))))
 
 (defun datep (line)
   "date predicate"
