@@ -6,8 +6,8 @@
   :license "Specify license here"
   :serial t
   :depends-on (#:cl-csv
-               #:clsql
-               #:clsql-sqlite3
+               #:cl-dbi
+	       #:clsql
 	       #:plump
                #:lquery
                #:alexandria
@@ -16,10 +16,19 @@
                #:local-time
                #:net-telent-date
                #:cl-ppcre
-               #:split-sequence)
+               #:split-sequence
+;	       #:lantern
+	       )
   :components ((:file "package")
+	       (:file "utilities")
+	       (:file "classes")
+	       ;; (:file "parameters")
                (:file "finance")
 	       (:file "debt")
-               (:file "utilities")
-               (:file "parse")
-               (:file "classify")))
+	       (:file "assets")
+	       (:file "taxes")
+;;	       (:file "csv")
+;;	       (:file "db")
+               (:file "pdf") ;; removing this and working with csv files for now
+;;             (:file "classify")
+	       ))

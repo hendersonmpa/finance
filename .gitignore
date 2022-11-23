@@ -1,2 +1,4 @@
 /debt.lisp~
 figures/
+/parameters.lisp
+pattern_alist.lisp

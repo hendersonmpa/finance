@@ -1,6 +1,5 @@
 #+TITLE:     README.org
 #+AUTHOR:    Matthew Henderson
-#+EMAIL:     matthew@darwin.cheo.on.ca
 #+DATE:      2015-06-07 Sun
 #+DESCRIPTION:
 #+KEYWORDS:
