@@ -63,7 +63,7 @@ Total paid ~$~%
 Principle-paid ~$~%
 Interest-paid ~$~%" years count remaining-principle total  principle-paid interest-paid))))))
 
-(amortization-period *mortgage-3* 16)
+;;(amortization-period *mortgage-3* 16)
 
 ;;; Plots
 (defmethod amortization-plot ((object mortgage))

@@ -22,7 +22,7 @@
   :components ((:file "package")
 	       (:file "utilities")
 	       (:file "classes")
-	       ;; (:file "parameters")
+	       (:file "parameters")
                (:file "finance")
 	       (:file "debt")
 	       (:file "assets")

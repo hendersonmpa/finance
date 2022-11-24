@@ -1,7 +1,7 @@
 ;;; file pdf.lisp
 ;;; Classes and Methods to parse pdf bank statements
 (in-package :finance)
-(uiop:directory-files *statements*)
+(uiop:directory-files *statements-dir*)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Convert pdf to xml
@@ -11,7 +11,7 @@
 
 ;; pdftohtml -xml 451401XXXXXX1544-2016Dec29-2017Jan24.pdf
 
-(defun pdf->xml (file-string &optional (dir-path *statements*))
+(defun pdf->xml (file-string &optional (dir-path *statements-dir*))
   "(pdf->xml \"451401XXXXXX1544-2016Dec29-2017Jan24.pdf\") and return xml pathname"
   (let* ((pathname (merge-pathnames dir-path file-string))
 	(file-path-string (namestring pathname)))
@@ -28,7 +28,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;<text top="668" left="67" width="24" height="12" font="1"><b>Date</b></text>
 
-(defparameter *bank* (plump:parse (merge-pathnames *statements* "00886XXX1871-2016Dec23-2017Jan23.xml"))
+(defparameter *bank* (plump:parse (merge-pathnames *statements-dir* "00886XXX1871-2016Dec23-2017Jan23.xml"))
  "parsed doc used for development" )
 
 (defparameter *bank-vop* (map 'vector (lambda (page)
@@ -38,7 +38,7 @@
 			      (lquery:$  *bank* "page"))
   "Vector of pages used for development")
 
-(defparameter *visa* (plump:parse (merge-pathnames *statements* "451401XXXXXX1544-2016Dec29-2017Jan24.xml"))
+(defparameter *visa* (plump:parse (merge-pathnames *statements-dir* "451401XXXXXX1544-2016Dec29-2017Jan24.xml"))
   "parsed doc used for development")
 
 (defparameter *visa-vop* (map 'vector (lambda (page)
@@ -52,7 +52,7 @@
 ;;; Classes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;;; Statements
+;;; Statement classes 
 (defclass statement ()
   ((pages :initarg :pages :accessor pages)
    (transactions :initarg :transactions :accessor transactions))
@@ -66,7 +66,7 @@
   ()
   (:documentation "bank statement object"))
 
-;;; Pages 
+;;; Page classes  
 
 (defclass statement-page ()
   ((raw :initarg :raw :accessor raw :documentation "raw data")
@@ -86,7 +86,7 @@
   ()
   (:documentation "visa statement page object"))
 
-;;; Transactions
+;;; Transaction classes
 
 (defclass transaction ()
   ((date :initarg :date :accessor date)
@@ -118,6 +118,7 @@
 	 (raw-pages (extract-pages parsed-content)))
     (make-instance 'bank-statement
 		   :pages (map 'vector #'make-bank-statement-page raw-pages))))
+ 
 
 (defun make-visa-statement (pdf-file-string)
   "Accept a visa statement pdf file string and return a visa-statement object"
@@ -126,6 +127,8 @@
 	 (raw-pages (extract-pages parsed-content)))
     (make-instance 'visa-statement
 		   :pages (map 'vector #'make-visa-statement-page raw-pages))))
+
+
 ;;; pages
 (defun make-bank-statement-page (page)
   (make-instance 'bank-statement-page
@@ -153,13 +156,18 @@
                  :description description
                  :amount amount))
 
-
 (defmethod initialize-instance :after ((object statement-page) &key)
-  "at this point only pages are added, these are now parsed to get anchors, filter lines using anchors, and gather into transactions"
+  "at this point only raw-pages are added, these are now parsed to get anchors, filter lines using anchors, and gather into transactions"
   (progn
     (get-anchors object)
     (filter-page object)
     (gather-transactions object)))
+
+(defmethod initialize-instance :after ((object statement) &key)
+  "at this point only raw-pages are added, these are now parsed to get anchors, filter lines using anchors, and gather into transactions"
+  (with-accessors ((transactions transactions)) object
+      (setf transactions (map 'vector #'make-transaction-objects
+			      (slot-value object 'pages)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Methods and functions
@@ -339,10 +347,10 @@ plist date type description amount.."
     (list :start-month start-month :start-year start-year :end-month end-month :end-year end-year)))
 
 
-(defgeneric make-transaction-objects ((object statement-page)))
+(defgeneric make-transaction-objects (statement-page)
+  (:documentation "accept a list of statement-page objects, and returns a list of objects used in the 'INTIALIZE-INSTANCE :AFTER' method"))
 
-(defmethod make-transaction-objects ((object statement-page))
-    "accept a list of transactions, return a list of objects"
+(defmethod make-transaction-objects ((object bank-statement-page))
     (with-accessors ((transactions transactions)) object
       (let ((accum nil)
 	    (year "2022") ;; place holder until it is extracted from the statement
@@ -351,7 +359,23 @@ plist date type description amount.."
 	      )
 	  (dolist (entry transactions accum)
 	    (destructuring-bind (date type description amount) entry
-	      (let ((formated-date (parse-date-string date year)))
+	      (let ((formated-date (parse-bank-date-string date year)))
+		(case type
+		  (withdrawal (push (make-withdrawal formated-date description amount) accum))
+		  (deposit (push (make-deposit formated-date description amount) accum))
+		  (visa (push (make-visa formated-date description amount) accum))
+		  (otherwise nil))))))))
+
+(defmethod make-transaction-objects ((object visa-statement-page))
+    (with-accessors ((transactions transactions)) object
+      (let ((accum nil)
+	    (year "2022") ;; place holder until it is extracted from the statement
+	    ;; TODO figure out how to deal with statements that span two years.
+	      ;;(date-range-plist (filename-date-range statement-file-name))
+	      )
+	  (dolist (entry transactions accum)
+	    (destructuring-bind (date type description amount) entry
+	      (let ((formated-date (parse-visa-date-string date year)))
 		(case type
 		  (withdrawal (push (make-withdrawal formated-date description amount) accum))
 		  (deposit (push (make-deposit formated-date description amount) accum))
@@ -359,8 +383,12 @@ plist date type description amount.."
 		  (otherwise nil))))))))
 
 (defparameter *bank-tester* (make-bank-statement "Chequing Statement-1871 2022-10-21.pdf"))
+(defparameter *visa-tester* (make-visa-statement "Visa Statement-5953 2022-11-17.pdf"))
 
-;;(defparameter *visa-tester* (make-visa-statement "Visa Statement-5953 2022-11-17.pdf"))
+
+(map 'vector #'make-bank-statement-page raw-pages)
+
+
 
 (defmethod print-object ((object transaction) stream)
   "print transaction object"

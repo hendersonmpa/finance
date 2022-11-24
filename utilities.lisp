@@ -31,12 +31,21 @@
 
 ;;(filename-date-range "00886XXX1871-2016Dec23-2017Jan23.xml")
 
-(defun parse-date-string (date-string year-string)
+(defun parse-visa-date-string (date-string year-string)
   "Convert date string format 'mmm dd' to 'mmm-DD-YYYY'"
   (re:register-groups-bind (month-string day-string)
       ("(\\w{3}) (\\d{2})" date-string)
-     (format nil "~a ~d ~d" month-string day-string year-string)))
-;; (let ((date-list (mapcar #'parse-number:parse-number (list month-string day-string year-string)))))
+    (format nil "~a ~d ~d" month-string day-string year-string)))
+
+(parse-visa-date-string "OCT 24" "2022")
+
+(defun parse-bank-date-string (date-string year-string)
+  "Convert date string format 'mmm dd' to 'mmm-DD-YYYY'"
+  (re:register-groups-bind (day-string month-string )
+      ("(\\d{1,2}) (\\w{3})" date-string)
+    (format nil "~a ~2,'0d ~d" month-string (parse-number:parse-number day-string) year-string)))
+
+(parse-bank-date-string "5 Oct" "2022")
 
 (defun handler-parse-timestring (s)
   (handler-case (clsql-sys:parse-timestring s :junk-allowed t)
