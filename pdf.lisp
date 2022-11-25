@@ -119,7 +119,10 @@
     (make-instance 'bank-statement
 		   :pages (map 'vector #'make-bank-statement-page raw-pages))))
  
-
+;; TODO remove the following entries:
+;;Description:"PAYMENT - THANK YOU / PAIEMENT - MERCI", 
+;;Description:"SUBTOTAL OF MONTHLY ACTIVITY"
+;;Description:"TOTAL ACCOUNT BALANCE"
 (defun make-visa-statement (pdf-file-string)
   "Accept a visa statement pdf file string and return a visa-statement object"
   (let* ((xml-file-name (pdf->xml pdf-file-string))
@@ -127,7 +130,6 @@
 	 (raw-pages (extract-pages parsed-content)))
     (make-instance 'visa-statement
 		   :pages (map 'vector #'make-visa-statement-page raw-pages))))
-
 
 ;;; pages
 (defun make-bank-statement-page (page)
@@ -172,9 +174,8 @@
 	  ;;(mapcar #'make-transaction-objects (slot-value object 'pages))
 	  )))
 
-
-
-(defparameter *visa-tester* (make-visa-statement "Visa Statement-5953 2022-11-17.pdf"))
+;;(defparameter *bank-tester* (make-bank-statement "Chequing Statement-1871 2022-11-23.pdf"))
+;;(defparameter *visa-tester* (make-visa-statement "Visa Statement-5953 2022-11-17.pdf"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Methods and functions
@@ -426,14 +427,6 @@ plist date type description amount.."
 ;; (dolist (ob (list-to-objects (bank-statement-transactions (bank-statement-parse)) (filename-date-range "00886XXX1871-2016Dec23-2017Jan23.xml")))
 ;;   (format-object ob t))
 
-;; (defun parse-transaction-csv (pathname)
-;;   (cl-csv:read-csv pathname
-;;                    :map-fn #'make-transaction
-;;                    :skip-first-p t
-;;                    :separator #\,
-;;                                         ;:quote t ;; there are quotes in comment strings
-;;                    :unquoted-empty-string-is-nil t))
-
 (defun archive-file (old-pathname &optional (to-subdir "archive"))
   "Archive csv file"
   (let ((new-pathname
@@ -442,27 +435,5 @@ plist date type description amount.."
                                     (butlast (pathname-directory old-pathname))
                                     (list to-subdir)))))
     (rename-file old-pathname new-pathname)))
-
-(defun load-dir (&optional (dir-name *statements*))
-  "Upload files to db table based on regex match"
-  (let ((path-list (uiop:directory-files dir-name))
-        (accum nil))
-    (dolist (pathname path-list (apply #'nconc accum))
-      (push (parse-transaction-csv pathname) accum))))
-
-;;(defparameter *lot* (load-dir))
-
-(defun filter-desc (str data)
-  (flet ((pred (e)
-           (search str e :test #'string-equal)))
-    (remove-if-not #'pred data :key #'desc)))
-
-;;(filter-desc "netflix" *lot*)
-
-;; filter date
-
-(defun payee-sum (payee lot)
-  (let ((fl (filter (lambda (e) (search )))))))
-
 
 

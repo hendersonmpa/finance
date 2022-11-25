@@ -21,7 +21,25 @@
 	  :catagory nil)))
 
 
+;; (defun load-dir (&optional (dir-name *statements-dir*))
+;;   "Upload files to db table based on regex match"
+;;   (let ((path-list (uiop:directory-files dir-name))
+;;         (accum nil))
+;;     (dolist (pathname path-list (apply #'nconc accum))
+;;       (push (parse-transaction-csv pathname) accum))))
 
+;;(defparameter *lot* (load-dir))
 
+;; (defun filter-desc (str data)
+;;   (flet ((pred (e)
+;;            (search str e :test #'string-equal)))
+;;     (remove-if-not #'pred data :key #'desc)))
+
+;;(filter-desc "netflix" *lot*)
+
+;; filter date
+
+;; (defun payee-sum (payee lot)
+;;   (let ((fl (filter (lambda (e) (search )))))))
 
 
