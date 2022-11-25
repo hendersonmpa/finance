@@ -28,25 +28,25 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;<text top="668" left="67" width="24" height="12" font="1"><b>Date</b></text>
 
-(defparameter *bank* (plump:parse (merge-pathnames *statements-dir* "00886XXX1871-2016Dec23-2017Jan23.xml"))
- "parsed doc used for development" )
+;; (defparameter *bank* (plump:parse (merge-pathnames *statements-dir* "00886XXX1871-2016Dec23-2017Jan23.xml"))
+;;  "parsed doc used for development" )
 
-(defparameter *bank-vop* (map 'vector (lambda (page)
-				   (lquery:$ page
-					     "text"
-					     (combine (attr :left) (attr :width) (text))))
-			      (lquery:$  *bank* "page"))
-  "Vector of pages used for development")
+;; (defparameter *bank-vop* (map 'vector (lambda (page)
+;; 				   (lquery:$ page
+;; 					     "text"
+;; 					     (combine (attr :left) (attr :width) (text))))
+;; 			      (lquery:$  *bank* "page"))
+;;   "Vector of pages used for development")
 
-(defparameter *visa* (plump:parse (merge-pathnames *statements-dir* "451401XXXXXX1544-2016Dec29-2017Jan24.xml"))
-  "parsed doc used for development")
+;; (defparameter *visa* (plump:parse (merge-pathnames *statements-dir* "451401XXXXXX1544-2016Dec29-2017Jan24.xml"))
+;;   "parsed doc used for development")
 
-(defparameter *visa-vop* (map 'vector (lambda (page)
-				   (lquery:$ page
-					     "text"
-					     (combine (attr :left) (text))))
-			      (lquery:$  *visa* "page"))
-  "Vector of pages used for development")
+;; (defparameter *visa-vop* (map 'vector (lambda (page)
+;; 				   (lquery:$ page
+;; 					     "text"
+;; 					     (combine (attr :left) (text))))
+;; 			      (lquery:$  *visa* "page"))
+;;   "Vector of pages used for development")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Classes
@@ -166,8 +166,15 @@
 (defmethod initialize-instance :after ((object statement) &key)
   "at this point only raw-pages are added, these are now parsed to get anchors, filter lines using anchors, and gather into transactions"
   (with-accessors ((transactions transactions)) object
-      (setf transactions (map 'vector #'make-transaction-objects
-			      (slot-value object 'pages)))))
+    (setf transactions ;
+	  (apply 'concatenate 'list (map 'list #'make-transaction-objects
+					 (slot-value object 'pages)))
+	  ;;(mapcar #'make-transaction-objects (slot-value object 'pages))
+	  )))
+
+
+
+(defparameter *visa-tester* (make-visa-statement "Visa Statement-5953 2022-11-17.pdf"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Methods and functions
@@ -381,13 +388,6 @@ plist date type description amount.."
 		  (deposit (push (make-deposit formated-date description amount) accum))
 		  (visa (push (make-visa formated-date description amount) accum))
 		  (otherwise nil))))))))
-
-(defparameter *bank-tester* (make-bank-statement "Chequing Statement-1871 2022-10-21.pdf"))
-(defparameter *visa-tester* (make-visa-statement "Visa Statement-5953 2022-11-17.pdf"))
-
-
-(map 'vector #'make-bank-statement-page raw-pages)
-
 
 
 (defmethod print-object ((object transaction) stream)
