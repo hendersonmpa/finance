@@ -174,9 +174,6 @@
 	  ;;(mapcar #'make-transaction-objects (slot-value object 'pages))
 	  )))
 
-;;(defparameter *bank-tester* (make-bank-statement "Chequing Statement-1871 2022-11-23.pdf"))
-;;(defparameter *visa-tester* (make-visa-statement "Visa Statement-5953 2022-11-17.pdf"))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Methods and functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -351,7 +348,7 @@ plist date type description amount.."
 (defmethod statement-date-range ((object bank-statement))
   "accepts a filename form '00886XXX1871-2016Dec23-2017Jan23.xml'"
   (re:register-groups-bind (start-year start-month end-year end-month)
-      ("\\w{12}-(\\d{4})(\\w{3})\\d{1,2}-(\\d{4})(\\w{3})\\d{1,2}" filename)
+      ("\\w{12}-(\\d{4})(\\w{3})\\d{1,2}-(\\d{4})(\\w{3})\\d{1,2}" "00886XXX1871-2016Dec23-2017Jan23.xml")
     (list :start-month start-month :start-year start-year :end-month end-month :end-year end-year)))
 
 
